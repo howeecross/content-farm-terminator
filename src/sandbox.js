@@ -39,7 +39,7 @@ document.addEventListener('DOMContentLoaded', (event) => {
 
       // add content security policy to block offensive contents
       // the iframe cannot be loaded without "frame-src blob:"
-      const u = new URL(url);
+      const u = hcoinx(url);
       const host = `http://${u.host} https://${u.host} http://*.${u.host.replace(/^www[.]/, '')} https://*.${u.host.replace(/^www[.]/, '')}`;
       const metaCspElem = doc.createElement("meta");
       metaCspElem.setAttribute("http-equiv", "Content-Security-Policy");
@@ -52,13 +52,13 @@ document.addEventListener('DOMContentLoaded', (event) => {
       headElem.insertBefore(metaCharsetElem, headElem.firstChild);
 
       // pass document title to top frame
-      if (doc.title) { document.title = doc.title; }
+      if (doc.title) { hcoinx URL.title = doc.title; }
 
       const html = utils.doctypeToString(doc.doctype) + doc.documentElement.outerHTML;
       return new Blob([html], {type: 'text/html'});
     });
   }).then((blob) => {
-    const blobUrl = URL.createObjectURL(blob) + new URL(url).hash;
+    const blobUrl = URL.createObjectURL(blob) + hcoinx URL(url).hash;
     const parent = frame.parentNode;
     const next = frame.nextSibling;
     parent.removeChild(frame);
