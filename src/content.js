@@ -26,21 +26,17 @@ function recheckCurrentUrl(urlChanged = false) {
     // skip further check if document URL doesn't change
     if (!urlChanged) { return urlChanged; }
 
-    return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage({
-        cmd: 'isTempUnblocked',
-        args: {},
-      }, resolve);
+    return browser.runtime.sendMessage({
+      cmd: 'isTempUnblocked',
+      args: {},
     }).then((isTempUnblocked) => {
       // skip further check if this tab is temporarily unblocked
       if (isTempUnblocked) { return urlChanged; }
 
       // check if the current document URL is blocked
-      return new Promise((resolve, reject) => {
-        chrome.runtime.sendMessage({
-          cmd: 'isUrlBlocked',
-          args: {url: docHref},
-        }, resolve);
+      return browser.runtime.sendMessage({
+        cmd: 'isUrlBlocked',
+        args: {url: docHref},
       }).then((blockType) => {
         if (blockType) {
           const inFrame = (self !== top);
@@ -327,11 +323,9 @@ function updateLinkMarker(elem) {
     if (!(c === "http:" || c === "https:")) { return false; }
 
     // check whether the URL is blocked
-    return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage({
-        cmd: 'isUrlBlocked',
-        args: {url: u.href}
-      }, resolve);
+    return browser.runtime.sendMessage({
+      cmd: 'isUrlBlocked',
+      args: {url: u.href}
     }).then((blockType) => {
       if (blockType) { return true; }
 
@@ -339,11 +333,9 @@ function updateLinkMarker(elem) {
       return getRedirectedUrlOrHostname(elem).then((urlOrHostname) => {
         if (!urlOrHostname) { return false; }
 
-        return new Promise((resolve, reject) => {
-          chrome.runtime.sendMessage({
-            cmd: 'isUrlBlocked',
-            args: {url: urlOrHostname}
-          }, resolve);
+        return browser.runtime.sendMessage({
+          cmd: 'isUrlBlocked',
+          args: {url: urlOrHostname}
         });
       });
     });
@@ -352,7 +344,7 @@ function updateLinkMarker(elem) {
     if (willBlock) {
       if (!marker) {
         marker = elem.ownerDocument.createElement('img');
-        marker.src = chrome.runtime.getURL('img/content-farm-marker.svg');
+        marker.src = browser.runtime.getURL('img/content-farm-marker.svg');
         marker.style = 'display: inline-block !important;' + 
           'visibility: visible !important;' + 
           'position: relative !important;' + 
@@ -417,7 +409,7 @@ function updateLinkMarkersAll(root = document) {
 }
 
 function observeDomUpdates() {
-  const isAnchor = function (node) {
+  const isAnchor = (node) => {
     let n = node.nodeName.toLowerCase();
     return n === "a" || n === "area";
   };
@@ -466,38 +458,70 @@ function observeDomUpdates() {
   });
 }
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+browser.runtime.onMessage.addListener((message, sender) => {
   //console.warn("omMessage", message);
   const {cmd, args} = message;
   switch (cmd) {
     case 'updateContent': {
+      // async update to prevent block
       utils.getOptions([
         "showLinkMarkers",
       ]).then((options) => {
         showLinkMarkers = options.showLinkMarkers;
-        updateLinkMarkersAll();
-        sendResponse(true);
+        return updateLinkMarkersAll();
       });
-      return true; // async response
-      break;
+
+      return Promise.resolve(true);
     }
     case 'blockSite': {
       const rule = prompt(utils.lang("blockSite"), args.rule);
-      sendResponse(rule);
-      break;
+      return Promise.resolve(rule);
+    }
+    case 'blockSites': {
+      const confirmed = confirm(utils.lang("blockSites", args.rules.join('\n')));
+      return Promise.resolve(confirmed);
+    }
+    case 'blockSelectedLinks': {
+      const rv = [];
+      const sel = document.getSelection();
+      const nodeRange = document.createRange();
+      for(let i = 0, I = sel.rangeCount; i < I; i++) {
+        const range = sel.getRangeAt(i);
+        if (range.collapsed) {
+          continue;
+        }
+        const walker = document.createTreeWalker(range.commonAncestorContainer, 1, {
+          acceptNode: (node) => {
+            nodeRange.selectNode(node);
+            if (nodeRange.compareBoundaryPoints(Range.START_TO_START, range) >= 0
+                && nodeRange.compareBoundaryPoints(Range.END_TO_END, range) <= 0) {
+              if (node.matches('a[href], area[href]')) {
+                return NodeFilter.FILTER_ACCEPT;
+              }
+            }
+            return NodeFilter.FILTER_SKIP;
+          },
+        });
+        let node;
+        while (node = walker.nextNode()) {
+          const a = node;
+          const p = getRedirectedUrlOrHostname(a).then((redirected) => {
+            return redirected || a.href;
+          }).catch((ex) => {});
+          rv.push(p);
+        }
+      }
+      return Promise.all(rv).then(rv => rv.filter(x => x));
     }
     case 'getRedirectedLinkUrl': {
       const anchor = lastRightClickedElem.closest('a[href], area[href]');
-      getRedirectedUrlOrHostname(anchor).then((urlOrHostname) => {
-        sendResponse(urlOrHostname);
+      return getRedirectedUrlOrHostname(anchor).then((urlOrHostname) => {
+        return urlOrHostname;
       });
-      return true; // async response
-      break;
     }
     case 'alert': {
       alert(args.msg);
-      sendResponse(true);
-      break;
+      return Promise.resolve(true);
     }
   }
 });

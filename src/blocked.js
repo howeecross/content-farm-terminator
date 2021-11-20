@@ -2,20 +2,16 @@ const urlObj = new URL(location.href);
 const sourceUrl = urlObj.searchParams.get('to');
 
 function recheckBlock() {
-  return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage({
-      cmd: 'isTempUnblocked',
-      args: {},
-    }, resolve);
+  return browser.runtime.sendMessage({
+    cmd: 'isTempUnblocked',
+    args: {},
   }).then((isTempUnblocked) => {
     // skip further check if this tab is temporarily unblocked
     if (isTempUnblocked) { return false; }
 
-    return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage({
-        cmd: 'isUrlBlocked',
-        args: {url: sourceUrl}
-      }, resolve);
+    return browser.runtime.sendMessage({
+      cmd: 'isUrlBlocked',
+      args: {url: sourceUrl},
     });
   }).then((isBlocked) => {
     if (!isBlocked) {
@@ -39,7 +35,7 @@ document.addEventListener('DOMContentLoaded', (event) => {
       elem.style.fontSize = '0.8em';
       document.querySelector('#warningUrl').appendChild(elem);
     } else {
-      document.querySelector('#warningUrl').textContent = punycode.toUnicode(sourceUrlObj.hostname);
+      document.querySelector('#warningUrl').textContent = punycode.toASCII(sourceUrlObj.hostname);
     }
   } catch (ex) {
     // sourceUrl is invalid, show raw sourceUrl
@@ -68,38 +64,30 @@ document.addEventListener('DOMContentLoaded', (event) => {
     if (prompt(utils.lang("unblockBtnPrompt", key)) !== key) {
       return;
     }
-    chrome.runtime.sendMessage({
+
+    return browser.runtime.sendMessage({
       cmd: 'tempUnblock',
       args: {},
-    }, (response) => {
-      if (response) {
-        location.replace(sourceUrl);
-      }
-    });
+    })
+      .then((response) => {
+        if (response) {
+          location.replace(sourceUrl);
+        }
+      });
   });
 
   document.querySelector('#back').addEventListener('click', (event) => {
-    if (history.length > 1) {
-      history.go(-1);
-    } else {
-      chrome.tabs.getCurrent((tab) => {
-        chrome.runtime.sendMessage({
-          cmd: 'closeTab',
-          args: {tabId: tab.id}
-        });
-      });
-    }
+    return utils.back();
   });
 });
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+browser.runtime.onMessage.addListener((message, sender) => {
   // console.warn("omMessage", message);
   const {cmd, args} = message;
   switch (cmd) {
     case 'updateContent': {
       recheckBlock();
-      sendResponse(true);
-      break;
+      return Promise.resolve(true);
     }
   }
 });

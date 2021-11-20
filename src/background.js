@@ -1,5 +1,6 @@
 let filter = new ContentFarmFilter();
 let updateFilterPromise;
+let autoUpdateFilterTimer;
 let tempUnblockTabs = new Set();
 
 const contextMenuController = {
@@ -7,61 +8,60 @@ const contextMenuController = {
 
   create() {
     return Promise.resolve().then(() => {
-      if (!chrome.contextMenus) { return; }
+      if (!browser.contextMenus) { return; }
 
       return Promise.resolve().then(() => {
         // Available only in Firefox >= 53.
-        if (chrome.contextMenus.ContextType.TAB) {
-          return new Promise((resolve, reject) => {
-            chrome.contextMenus.create({
-              title: utils.lang("blockTab"),
-              contexts: ["tab"],
-              documentUrlPatterns: ["http://*/*", "https://*/*"],
-              onclick: (info, tab) => {
-                return blockSite(info.pageUrl, tab.id, 0, this.quickMode);
-              }
-            }, resolve);
+        if (browser.contextMenus.ContextType.TAB) {
+          return browser.contextMenus.create({
+            title: utils.lang("blockTab"),
+            contexts: ["tab"],
+            documentUrlPatterns: ["http://*/*", "https://*/*"],
+            onclick: (info, tab) => {
+              return blockSite(info.pageUrl, tab.id, 0, this.quickMode);
+            },
           });
         }
       }).then(() => {
-        return new Promise((resolve, reject) => {
-          chrome.contextMenus.create({
-            title: utils.lang("blockPage"),
-            contexts: ["page"],
-            documentUrlPatterns: ["http://*/*", "https://*/*"],
-            onclick: (info, tab) => {
-              return blockSite(info.pageUrl, tab.id, info.frameId, this.quickMode);
-            }
-          }, resolve);
+        return browser.contextMenus.create({
+          title: utils.lang("blockPage"),
+          contexts: ["page"],
+          documentUrlPatterns: ["http://*/*", "https://*/*"],
+          onclick: (info, tab) => {
+            return blockSite(info.pageUrl, tab.id, info.frameId, this.quickMode);
+          },
         });
       }).then(() => {
-        return new Promise((resolve, reject) => {
-          chrome.contextMenus.create({
-            title: utils.lang("blockLink"),
-            contexts: ["link"],
-            documentUrlPatterns: ["http://*/*", "https://*/*"],
-            onclick: (info, tab) => {
-              return new Promise((resolve, reject) => {
-                chrome.tabs.sendMessage(tab.id, {
-                  cmd: 'getRedirectedLinkUrl'
-                }, {frameId: info.frameId}, resolve);
-              }).then((redirectedUrl) => {
-                const rule = redirectedUrl || info.linkUrl;
-                return blockSite(rule, tab.id, info.frameId, this.quickMode);
-              });
-            }
-          }, resolve);
+        return browser.contextMenus.create({
+          title: utils.lang("blockLink"),
+          contexts: ["link"],
+          documentUrlPatterns: ["http://*/*", "https://*/*"],
+          onclick: (info, tab) => {
+            return browser.tabs.sendMessage(tab.id, {
+              cmd: 'getRedirectedLinkUrl'
+            }, {frameId: info.frameId}).then((redirectedUrl) => {
+              const rule = redirectedUrl || info.linkUrl;
+              return blockSite(rule, tab.id, info.frameId, this.quickMode);
+            });
+          },
         });
       }).then(() => {
-        return new Promise((resolve, reject) => {
-          chrome.contextMenus.create({
-            title: utils.lang("blockSelection"),
-            contexts: ["selection"],
-            documentUrlPatterns: ["http://*/*", "https://*/*"],
-            onclick: (info, tab) => {
-              return blockSite(info.selectionText, tab.id, info.frameId, this.quickMode);
-            }
-          }, resolve);
+        return browser.contextMenus.create({
+          title: utils.lang("blockSelection"),
+          contexts: ["selection"],
+          documentUrlPatterns: ["http://*/*", "https://*/*"],
+          onclick: (info, tab) => {
+            return blockSite(info.selectionText, tab.id, info.frameId, this.quickMode);
+          },
+        });
+      }).then(() => {
+        return browser.contextMenus.create({
+          title: utils.lang("blockSelectedLinks"),
+          contexts: ["selection"],
+          documentUrlPatterns: ["http://*/*", "https://*/*"],
+          onclick: (info, tab) => {
+            return blockSelectedLinks(tab.id, info.frameId, this.quickMode);
+          },
         });
       });
     });
@@ -72,23 +72,23 @@ const contextMenuController = {
     "quickContextMenuCommands",
   ]) {
     return Promise.resolve().then(() => {
-      if (!chrome.contextMenus) { return; }
+      if (!browser.contextMenus) { return; }
 
-      return utils.getOptions(options).then(({showContextMenuCommands, quickContextMenuCommands}) => {
-        if (typeof quickContextMenuCommands !== 'undefined') {
-          this.quickMode = !!quickContextMenuCommands;
-        }
+      return utils.getOptions(options)
+        .then(({showContextMenuCommands, quickContextMenuCommands}) => {
+          if (typeof quickContextMenuCommands !== 'undefined') {
+            this.quickMode = !!quickContextMenuCommands;
+          }
 
-        if (typeof showContextMenuCommands !== 'undefined') {
-          return new Promise((resolve, reject) => {
-            chrome.contextMenus.removeAll(resolve);
-          }).then(() => {
-            if (showContextMenuCommands) {
-              return this.create();
-            }
-          });
-        }
-      });
+          if (typeof showContextMenuCommands !== 'undefined') {
+            return browser.contextMenus.removeAll()
+              .then(() => {
+                if (showContextMenuCommands) {
+                  return this.create();
+                }
+              });
+          }
+        });
     });
   },
 };
@@ -96,22 +96,18 @@ const contextMenuController = {
 const historyController = {
   onVisited(result) {
     // suppress extension pages from generating a history entry
-    if (result.url.startsWith(chrome.runtime.getURL(""))) {
-      chrome.history.deleteUrl({url: result.url});
+    if (result.url.startsWith(browser.runtime.getURL(""))) {
+      browser.history.deleteUrl({url: result.url});
     }
   },
 
   listen(willListen) {
-    if (!chrome.history) { return; }
+    if (!browser.history) { return; }
 
     if (willListen) {
-      if (!chrome.history.onVisited.hasListener(this.onVisited)) {
-        chrome.history.onVisited.addListener(this.onVisited);
-      }
+      browser.history.onVisited.addListener(this.onVisited);
     } else {
-      if (chrome.history.onVisited.hasListener(this.onVisited)) {
-        chrome.history.onVisited.removeListener(this.onVisited);
-      }
+      browser.history.onVisited.removeListener(this.onVisited);
     }
   },
 
@@ -125,7 +121,7 @@ const historyController = {
 };
 
 function updateFilter() {
-  return updateFilterPromise = utils.getDefaultOptions().then((options) => {
+  return updateFilterPromise = utils.getOptions().then((options) => {
     const newFilter = new ContentFarmFilter();
     newFilter.addTransformRules(options.transformRules);
     newFilter.addBlackList(options.userBlacklist);
@@ -134,53 +130,60 @@ function updateFilter() {
       .urlsTextToLines(options.webBlacklists)
       .map(u => newFilter.addBlackListFromUrl(u, options.webBlacklistsCacheDuration));
     return Promise.all(tasks).then(() => {
+      newFilter.makeCachedRules();
       filter = newFilter;
     });
   }).then(() => {
-    return new Promise((resolve, reject) => {
-      chrome.tabs.query({}, resolve);
-    }).then((tabs) => {
-      tabs.forEach((tab) => {
-        chrome.tabs.sendMessage(tab.id, {
-          cmd: 'updateContent'
-        });
+    // async update tabs to prevent block
+    browser.tabs.query({})
+      .then((tabs) => {
+        return Promise.all(tabs.map((tab) => {
+          return browser.tabs.sendMessage(tab.id, {
+            cmd: 'updateContent',
+          }).catch((ex) => {
+            return false;
+          });
+        }));
       });
-    });
+
+    return true;
   }).catch((ex) => {
     console.error(ex);
   });
 }
 
 function blockSite(rule, tabId, frameId, quickMode) {
-  return new Promise((resolve, reject) => {
+  return Promise.resolve().then(() => {
     rule = (rule || "").trim();
     rule = filter.parseRuleLine(rule, {validate: true, transform: 'standard', asString: true});
 
     if (quickMode) {
-      resolve(rule);
-      return;
+      return rule;
     }
 
-    chrome.tabs.sendMessage(tabId, {
+    return browser.tabs.sendMessage(tabId, {
       cmd: 'blockSite',
-      args: {rule}
-    }, {frameId}, resolve);
-  }).then((rule) => {
-    if (!rule) { return; }
+      args: {rule},
+    }, {frameId}).then((rule) => {
+      // cancled
+      if (!rule) { return rule; }
 
-    rule = filter.parseRuleLine(rule, {validate: true, asString: true});
+      // validate the user-modified rule
+      return filter.parseRuleLine(rule, {validate: true, asString: true});
+    });
+  }).then((rule) => {
+    // canceled
+    if (!rule) { return; }
 
     if (rule && filter.isInBlacklist(rule)) {
       if (quickMode) {
         return;
       }
 
-      return new Promise((resolve, reject) => {
-        chrome.tabs.sendMessage(tabId, {
-          cmd: 'alert',
-          args: {msg: utils.lang("blockSiteDuplicated", rule)}
-        }, {frameId}, resolve);
-      });
+      return browser.tabs.sendMessage(tabId, {
+        cmd: 'alert',
+        args: {msg: utils.lang("blockSiteDuplicated", rule)},
+      }, {frameId});
     }
 
     return utils.getOptions({
@@ -197,12 +200,66 @@ function blockSite(rule, tabId, frameId, quickMode) {
         return;
       }
 
-      return new Promise((resolve, reject) => {
-        chrome.tabs.sendMessage(tabId, {
-          cmd: 'alert',
-          args: {msg: utils.lang("blockSiteSuccess", rule)}
-        }, {frameId}, resolve);
+      return browser.tabs.sendMessage(tabId, {
+        cmd: 'alert',
+        args: {msg: utils.lang("blockSiteSuccess", rule)},
+      }, {frameId});
+    });
+  });
+}
+
+function blockSelectedLinks(tabId, frameId, quickMode) {
+  return browser.tabs.sendMessage(tabId, {
+    cmd: 'blockSelectedLinks',
+  }, {frameId}).then((list) => {
+    let rules = list.map((rule) => {
+      rule = (rule || "").trim();
+      rule = filter.parseRuleLine(rule, {validate: true, transform: 'standard', asString: true});
+      return rule;
+    }).filter(rule => !filter.isInBlacklist(rule));
+
+    if (!rules.length) {
+      return browser.tabs.sendMessage(tabId, {
+        cmd: 'alert',
+        args: {msg: utils.lang("blockSitesNoValidRules")},
+      }, {frameId});
+    }
+
+    // de-duplicate
+    rules = Array.from(new Set(rules));
+
+    if (quickMode) {
+      return rules;
+    }
+
+    return browser.tabs.sendMessage(tabId, {
+      cmd: 'blockSites',
+      args: {rules},
+    }, {frameId}).then((confirmed) => {
+      return confirmed ? rules : undefined;
+    });
+  }).then((rules) => {
+    // canceled
+    if (!rules) { return; }
+    
+    return utils.getOptions({
+      userBlacklist: ""
+    }).then((options) => {
+      let text = options.userBlacklist;
+      if (text) { text += "\n"; }
+      text = text + rules.join('\n');
+      return utils.setOptions({
+        userBlacklist: text
       });
+    }).then(() => {
+      if (quickMode) {
+        return;
+      }
+
+      return browser.tabs.sendMessage(tabId, {
+        cmd: 'alert',
+        args: {msg: utils.lang("blockSitesSuccess", rules.join('\n'))},
+      }, {frameId});
     });
   });
 }
@@ -225,7 +282,7 @@ function onBeforeRequestBlocker(details) {
     // Using data URI with meta or script refresh works but generates
     // an extra history entry.
     if (utils.userAgent.soup.has('firefox') && utils.userAgent.major < 56) {
-      chrome.tabs.update(details.tabId, {url: redirectUrl});
+      browser.tabs.update(details.tabId, {url: redirectUrl});
       return {cancel: true};
     }
 
@@ -244,180 +301,216 @@ function onBeforeRequestBlocker(details) {
  * This will be replaced by onBeforeRequestBlocker as long as updateFilter
  * is done.
  */
-let onBeforeRequestCallback = function (details) {
+function onBeforeRequestCallback(details) {
   return updateFilterPromise.then(() => {
     return onBeforeRequestBlocker(details);
   });
 };
 
-chrome.webRequest.onBeforeRequest.addListener((details) => {
-  return onBeforeRequestCallback(details);
-}, {urls: ["*://*/*"], types: ["main_frame", "sub_frame"]}, ["blocking"]);
+function autoUpdateFilter() {
+  if (autoUpdateFilterTimer) {
+    clearInterval(autoUpdateFilterTimer);
+    autoUpdateFilterTimer = null;
+  }
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  // console.warn("omMessage", message);
-  const {cmd, args} = message;
-  switch (cmd) {
-    case 'isUrlBlocked': {
-      updateFilterPromise.then(() => {
-        const blockType = filter.isBlocked(args.url);
-        sendResponse(blockType);
-      });
-      return true; // async response
-      break;
-    }
-    case 'isTempUnblocked': {
-      sendResponse(tempUnblockTabs.has(sender.tab.id));
-      break;
-    }
-    case 'tempUnblock': {
-      const tabId = sender.tab.id;
-      utils.getOptions([
-        "tempUnblockDuration",
-        "tempUnblockCountdownBase",
-        "tempUnblockCountdownIncrement",
-        "tempUnblockCountdownReset",
-        "tempUnblockCountdown",
-        "tempUnblockLastAccess",
-      ]).then((options) => {
-        // temporarily unblock the tab
-        tempUnblockTabs.add(tabId);
-        setTimeout(() => {
-          tempUnblockTabs.delete(tabId);
-        }, options.tempUnblockDuration);
-        sendResponse(true);
+  return utils.getOptions([
+    "webBlacklistsUpdateInterval",
+  ]).then(({webBlacklistsUpdateInterval}) => {
+    autoUpdateFilterTimer = setInterval(updateFilter, webBlacklistsUpdateInterval);
+  });
+}
 
-        // update countdown
-        if (options.tempUnblockLastAccess < 0 ||
-            Date.now() - options.tempUnblockLastAccess > options.tempUnblockCountdownReset) {
-          options.tempUnblockCountdown = -1;
-        }
+function initBeforeRequestListener() {
+  browser.webRequest.onBeforeRequest.addListener((details) => {
+    return onBeforeRequestCallback(details);
+  }, {urls: ["*://*/*"], types: ["main_frame", "sub_frame"]}, ["blocking"]);
+}
 
-        if (options.tempUnblockCountdown === -1) {
-          options.tempUnblockCountdown = options.tempUnblockCountdownBase;
-        }
-
-        options.tempUnblockCountdown += options.tempUnblockCountdownIncrement;
-        options.tempUnblockLastAccess = Date.now();
-
-        return utils.setOptions({
-          tempUnblockCountdown: options.tempUnblockCountdown,
-          tempUnblockLastAccess: options.tempUnblockLastAccess,
+function initMessageListener() {
+  browser.runtime.onMessage.addListener((message, sender) => {
+    // console.warn("omMessage", message);
+    const {cmd, args} = message;
+    switch (cmd) {
+      case 'isUrlBlocked': {
+        return updateFilterPromise.then(() => {
+          return filter.isBlocked(args.url);
         });
-      });
-      return true; // async response
-      break;
-    }
-    case 'getMergedBlacklist': {
-      updateFilterPromise.then(() => {
-        sendResponse(filter.getMergedBlacklist());
-      });
-      return true; // async response
-      break;
-    }
-    case 'updateOptions': {
-      const validator = new ContentFarmFilter();
-      args.transformRules = validator.validateTransformRulesText(args.transformRules);
-      validator.addTransformRules(args.transformRules);
-      args.userBlacklist = validator.validateRulesText(args.userBlacklist, 'url');
-      args.userWhitelist = validator.validateRulesText(args.userWhitelist, 'url');
-      utils.setOptions(args).then(() => {
-        sendResponse(true);
-      });
-      return true; // async response
-      break;
-    }
-    case 'closeTab': {
-      Promise.resolve().then(() => {
-        if (args.tabId) { return [args.tabId]; }
-        return new Promise((resolve, reject) => {
-          chrome.tabs.query({
+      }
+      case 'isTempUnblocked': {
+        return Promise.resolve(tempUnblockTabs.has(sender.tab.id));
+      }
+      case 'tempUnblock': {
+        const tabId = sender.tab.id;
+        return utils.getOptions([
+          "tempUnblockDuration",
+          "tempUnblockCountdownBase",
+          "tempUnblockCountdownIncrement",
+          "tempUnblockCountdownReset",
+          "tempUnblockCountdown",
+          "tempUnblockLastAccess",
+        ]).then((options) => {
+          // temporarily unblock the tab
+          tempUnblockTabs.add(tabId);
+          setTimeout(() => {
+            tempUnblockTabs.delete(tabId);
+          }, options.tempUnblockDuration);
+
+          // update countdown
+          if (options.tempUnblockLastAccess < 0 ||
+              Date.now() - options.tempUnblockLastAccess > options.tempUnblockCountdownReset) {
+            options.tempUnblockCountdown = -1;
+          }
+
+          if (options.tempUnblockCountdown === -1) {
+            options.tempUnblockCountdown = options.tempUnblockCountdownBase;
+          }
+
+          options.tempUnblockCountdown += options.tempUnblockCountdownIncrement;
+          options.tempUnblockLastAccess = Date.now();
+
+          return utils.setOptions({
+            tempUnblockCountdown: options.tempUnblockCountdown,
+            tempUnblockLastAccess: options.tempUnblockLastAccess,
+          });
+        }).then(() => {
+          return true;
+        });
+      }
+      case 'getMergedBlacklist': {
+        return updateFilterPromise.then(() => {
+          return filter.getMergedBlacklist();
+        });
+      }
+      case 'updateOptions': {
+        const validator = new ContentFarmFilter();
+        args.transformRules = validator.validateTransformRulesText(args.transformRules);
+        validator.addTransformRules(args.transformRules);
+        args.userBlacklist = validator.validateRulesText(args.userBlacklist, 'url');
+        args.userWhitelist = validator.validateRulesText(args.userWhitelist, 'url');
+        return utils.setOptions(args).then(() => {
+          return true;
+        });
+      }
+      case 'closeTab': {
+        Promise.resolve().then(() => {
+          if (args.tabId) { return [args.tabId]; }
+          return browser.tabs.query({
             active: true,
             currentWindow: true
-          }, resolve);
-        }).then((tabs) => {
-          return tabs.map(x => x.id);
+          }).then((tabs) => {
+            return tabs.map(x => x.id);
+          });
+        }).then((tabIds) => {
+          return browser.tabs.remove(tabIds);
         });
-      }).then((tabIds) => {
-        return new Promise((resolve, reject) => {
-          chrome.tabs.remove(tabIds, resolve);
-        });
-      });
-      sendResponse(true);
-      break;
-    }
-  }
-});
-
-chrome.storage.onChanged.addListener((changes, areaName) => {
-  // Config keys are stored in storage.sync and fallbacks to storage.local;
-  // cache keys are stored in storage.local and are valid JSON format.
-  // We only take action when at least one config key is changed.
-  if (areaName !== "sync") {
-    // skip if it's a storage.local.remove() rather than a real user modification
-    for (let key in changes) {
-      if (!("newValue" in changes[key])) { return; }
-      break;
-    }
-
-    // skip if no config key is changed
-    try {
-      for (let key in changes) { JSON.parse(key); }
-      return;
-    } catch(ex) {}
-  }
-
-  if ("showContextMenuCommands" in changes || "quickContextMenuCommands" in changes) {
-    const options = [];
-    if ("showContextMenuCommands" in changes) { options.push("showContextMenuCommands"); }
-    if ("quickContextMenuCommands" in changes) { options.push("quickContextMenuCommands"); }
-    contextMenuController.refresh(options);
-  }
-
-  if ("suppressHistory" in changes) {
-    historyController.refresh();
-  }
-
-  updateFilter().then(() => {
-    // @TODO:
-    // Say we have a shift from local to sync:
-    //
-    //     local {webBlacklists: "list1\nlist2"} => sync {webBlacklists: "list1"}
-    //     sync  {webBlacklists: ""}
-    //
-    // We get a change of sync: "" => "list1" and a change of local: "list1\nlist2" => undefined,
-    // and the cache of list2 is not cleared, while it should be, leaving staled cache not cleared.
-    if (changes.webBlacklists) {
-      filter.clearStaleWebListCache(changes.webBlacklists);
+        return Promise.resolve(true);
+      }
     }
   });
-});
+}
 
-chrome.runtime.onInstalled.addListener((details) => {
-  const {reason, previousVersion} = details;
+function initStorageChangeListener() {
+  browser.storage.onChanged.addListener((changes, areaName) => {
+    // Config keys are stored in storage.sync and fallbacks to storage.local;
+    // cache keys are stored in storage.local and are valid JSON format.
+    // We only take action when at least one config key is changed.
+    if (areaName !== "sync") {
+      // skip if it's a storage.local.remove() rather than a real user modification
+      for (let key in changes) {
+        if (!("newValue" in changes[key])) { return; }
+        break;
+      }
 
-  if (reason === "update" && utils.versionCompare(previousVersion, "2.1.2") === -1) {
-    return Promise.resolve().then(() => {
-      console.warn("Migrating options from < 2.1.2");
-      return utils.getOptions({
-        "webBlacklist": undefined,
-        "webBlacklists": undefined,
-      }).then((options) => {
-        if (options.webBlacklist && (typeof options.webBlacklists === "undefined")) {
-          let newWebBlacklists = utils.defaultOptions.webBlacklists + "\n" + options.webBlacklist;
-          return utils.setOptions({webBlacklists: newWebBlacklists}).then(() => {
-            updateFilter();
-          });
-        }
+      // skip if no config key is changed
+      try {
+        for (let key in changes) { JSON.parse(key); }
+        return;
+      } catch(ex) {}
+    }
+
+    {
+      const contextMenuOptions = [
+        "showContextMenuCommands",
+        "quickContextMenuCommands",
+      ].filter(x => x in changes);
+      if (contextMenuOptions.length) {
+        contextMenuController.refresh(contextMenuOptions);
+      }
+    }
+
+    if ("suppressHistory" in changes) {
+      historyController.refresh();
+    }
+
+    if ("webBlacklistsUpdateInterval" in changes) {
+      autoUpdateFilter();
+    }
+
+    {
+      const listOptions = [
+        "webBlacklists",
+        "userBlacklist",
+        "userWhitelist",
+        "transformRules",
+      ].filter(x => x in changes);
+      if (listOptions.length) {
+        updateFilter().then(() => {
+          // @TODO:
+          // Say we have a shift from local to sync:
+          //
+          //     local {webBlacklists: "list1\nlist2"} => sync {webBlacklists: "list1"}
+          //     sync  {webBlacklists: ""}
+          //
+          // We get a change of sync: "" => "list1" and a change of local: "list1\nlist2" => undefined,
+          // and the cache of list2 is not cleared, while it should be, leaving staled cache not cleared.
+          if (changes.webBlacklists) {
+            filter.clearStaleWebListCache(changes.webBlacklists);
+          }
+        });
+      }
+    }
+  });
+}
+
+function initInstallListener() {
+  browser.runtime.onInstalled.addListener((details) => {
+    const {reason, previousVersion} = details;
+
+    if (reason === "update" && utils.versionCompare(previousVersion, "2.1.2") === -1) {
+      return Promise.resolve().then(() => {
+        console.warn("Migrating options from < 2.1.2");
+        return utils.getOptions({
+          "webBlacklist": undefined,
+          "webBlacklists": undefined,
+        }).then((options) => {
+          if (options.webBlacklist && (typeof options.webBlacklists === "undefined")) {
+            let newWebBlacklists = utils.defaultOptions.webBlacklists + "\n" + options.webBlacklist;
+            return utils.setOptions({webBlacklists: newWebBlacklists}).then(() => {
+              updateFilter();
+            });
+          }
+        });
+      }).then(() => {
+        console.warn("Migrated successfully.");
       });
-    }).then(() => {
-      console.warn("Migrated successfully.");
-    });
-  }
-});
+    }
+  });
+}
 
-if (chrome.browserAction) {
-  chrome.browserAction.onClicked.addListener((tab) => {
+function initBrowserAction() {
+  if (!browser.browserAction) {
+    // Firefox Android < 55: no browserAction
+    // Fallback to pageAction.
+    // Firefox Android ignores the tabId parameter and
+    // shows the pageAction for all tabs
+    browser.pageAction.onClicked.addListener((tab) => {
+      const url = browser.runtime.getURL("options.html");
+      browser.tabs.create({url: url, active: true});
+    });
+    browser.pageAction.show(0);
+  }
+
+  browser.browserAction.onClicked.addListener((tab) => {
     let url;
     try {
       const refUrlObj = new URL(tab.url);
@@ -425,32 +518,29 @@ if (chrome.browserAction) {
         throw new Error('URL not under http(s) protocol.');
       }
       const refUrl = utils.getNormalizedUrl(refUrlObj);
-      url = chrome.runtime.getURL("options.html") + `?from=${encodeURIComponent(refUrl)}`;
+      url = browser.runtime.getURL("options.html") + `?from=${encodeURIComponent(refUrl)}`;
     } catch (ex) {
-      url = chrome.runtime.getURL("options.html");
+      url = browser.runtime.getURL("options.html");
     }
-    chrome.tabs.create({url: url, active: true});
+    browser.tabs.create({url: url, active: true});
   });
-} else {
-  // Firefox Android < 55: no browserAction
-  // Fallback to pageAction.
-  // Firefox Android ignores the tabId parameter and
-  // shows the pageAction for all tabs
-  chrome.pageAction.onClicked.addListener((tab) => {
-    const url = chrome.runtime.getURL("options.html");
-    chrome.tabs.create({url: url, active: true});
-  });
-  chrome.pageAction.show(0);
 }
 
-contextMenuController.refresh();
-historyController.refresh();
+function init() {
+  initBeforeRequestListener();
+  initMessageListener();
+  initStorageChangeListener();
+  initInstallListener();
+  initBrowserAction();
 
-updateFilter().then(() => {
-  onBeforeRequestCallback = onBeforeRequestBlocker;
-  return utils.getOptions([
-    "webBlacklistsUpdateInterval",
-  ]).then((options) => {
-    setInterval(updateFilter, options.webBlacklistsUpdateInterval);
-  });
-});
+  contextMenuController.refresh(); // async
+  historyController.refresh(); // async
+
+  updateFilter() // async
+    .then(() => {
+      onBeforeRequestCallback = onBeforeRequestBlocker;
+      return autoUpdateFilter();
+    });
+}
+
+init();

@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "__MSG_appName__",
-  "version": "3.12.0",
+  "version": "4.2.0",
   "description": "__MSG_appDesc__",
   "author": "Danny Lin",
   "default_locale": "en",
@@ -33,7 +33,9 @@
 
   "background": {
     "scripts": [
+      "lib/browser-polyfill.js",
       "lib/punycode.js",
+      "content-farm-filter.js",
       "utils.js",
       "background.js"
     ]
@@ -48,6 +50,8 @@
         "file:///*"
       ],
       "js": [
+        "lib/browser-polyfill.js",
+        "lib/punycode.js",
         "utils.js",
         "content.js"
       ],

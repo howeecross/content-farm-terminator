@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "__MSG_appName__",
-  "version": "3.12.0",
+  "version": "4.2.0",
   "description": "__MSG_appDesc__",
   "author": "Danny Lin",
   "default_locale": "en",
@@ -38,6 +38,7 @@
     "scripts": [
       "lib/punycode.js",
       "utils.js",
+      "content-farm-filter.js",
       "background.js"
     ]
   },
@@ -50,6 +51,7 @@
         "https://*/*"
       ],
       "js": [
+        "lib/punycode.js",
         "utils.js",
         "content.js"
       ],
